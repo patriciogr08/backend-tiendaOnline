@@ -1,40 +1,63 @@
-import Joi from 'joi';
-import jwt from 'jsonwebtoken';
 import { pool } from '../config/db.js';
-import { comparePassword } from '../utils/hash.js';
+import { verifyPassword } from '../utils/hash.js';
+import { signAccessToken } from '../utils/jwt.js';
 
-const loginSchema = Joi.object({
-    correo: Joi.string().email().required(),
-    contrasena: Joi.string().required()
-});
+export const AuthController = {
+    async login(req, res) {
+        const { correo, password } = req.body || {};
+        if (!correo || !password) return res.status(400).json({ message: 'Datos incompletos' });
 
-export async function login(req, res) {
-    const { error, value } = loginSchema.validate(req.body);
-    if (error) return res.status(400).json({ message: error.message });
+        const [rows] = await pool.query(
+            `SELECT u.id, u.nombre_completo, u.correo, u.telefono, u.estado, u.rol_id,
+                    u.contrasena_hash,
+                    r.nombre AS rol
+            FROM usuario u
+            JOIN rol r ON r.id = u.rol_id
+            WHERE u.correo = ? AND u.estado = 'ACTIVE'
+            LIMIT 1`,
+            [correo]
+        );
+        if (!rows.length) return res.status(401).json({ message: 'Credenciales inválidas' });
 
-    const { correo, contrasena } = value;
+        const row = rows[0];
+        const ok = await verifyPassword(password, row.contrasena_hash);
+        if (!ok) return res.status(401).json({ message: 'Credenciales inválidas' });
 
-    const [rows] = await pool.query(
-        `SELECT u.id, u.contrasena_hash, u.estado, r.nombre AS rol_nombre
-        FROM usuario u
-        JOIN rol r ON r.id = u.rol_id
-        WHERE u.correo = ? LIMIT 1`,
-        [correo]
-    );
+        // Usuario tal cual BD (sin contrasena_hash)
+        const user = {
+            id: row.id,
+            nombre_completo: row.nombre_completo,
+            correo: row.correo,
+            rol_id: row.rol_id,
+            rol: row.rol
+        };
 
-    if (!rows.length) return res.status(401).json({ message: 'Credenciales inválidas' });
+        const accessToken = signAccessToken({
+        sub: user.id,
+        correo: user.correo,
+        rol: user.rol,
+        nombre_completo: user.nombre_completo
+        });
 
-    const user = rows[0];
-    if (user.estado !== 'ACTIVE') return res.status(403).json({ message: 'Usuario bloqueado' });
+        return res.json({ accessToken, user });
+    },
 
-    const ok = comparePassword(contrasena, user.contrasena_hash);
-    if (!ok) return res.status(401).json({ message: 'Credenciales inválidas' });
+    async me(req, res) {
+        const userJwt = req.user;
+        const [rows] = await pool.query(
+            `SELECT u.id, u.nombre_completo, u.correo, u.telefono, u.estado, u.rol_id,
+                    r.nombre AS rol
+            FROM usuario u
+            JOIN rol r ON r.id = u.rol_id
+            WHERE u.id = ? LIMIT 1`,
+            [userJwt.sub]
+        );
+        if (!rows.length) return res.status(404).json({ message: 'Usuario no encontrado' });
+        return res.json(rows[0]); // snake_case tal cual
+    },
 
-    const token = jwt.sign(
-        { id: user.id, correo, rol_nombre: user.rol_nombre },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-
-    res.json({ token });
-}
+    async logout(_req, res) {
+        // Stateless: el frontend elimina el token
+        return res.json({ message: 'OK' });
+    }
+};

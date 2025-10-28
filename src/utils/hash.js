@@ -5,6 +5,6 @@ export function hashPassword(plain) {
   return bcrypt.hashSync(plain, salt);
 }
 
-export function comparePassword(plain, hash) {
+export function verifyPassword(plain, hash) {
   return bcrypt.compareSync(plain, hash);
 }
