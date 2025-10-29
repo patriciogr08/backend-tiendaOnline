@@ -33,10 +33,10 @@ export const AuthController = {
         };
 
         const accessToken = signAccessToken({
-        sub: user.id,
-        correo: user.correo,
-        rol: user.rol,
-        nombre_completo: user.nombre_completo
+            id: user.id,
+            correo: user.correo,
+            rol: user.rol,
+            nombre_completo: user.nombre_completo
         });
 
         return res.json({ accessToken, user });
