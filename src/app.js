@@ -12,7 +12,7 @@ import api from './routes/index.js';
 import { errorHandler } from './middlewares/errorHandler.middleware.js';
 import { notFound } from './middlewares/notFound.middleware.js';
 import { httpLogger, varyOriginHeader } from './utils/logger.js';
-// import { requestId } from './middlewares/requestId.js';
+import { MOUNT_PATH } from './config/multer.config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,21 +27,17 @@ export function createApp() {
     app.use(cors(corsOptions));
     app.use(cors(corsOptions));
     app.use(varyOriginHeader);
-
-    // Identificador de request (opcional)
-    // app.use(requestId);
-
-    // Logs + performance
     app.use(httpLogger);
     app.use(compression());
     app.use(express.json({ limit: '5mb' }));
 
     // Archivos estáticos (imágenes)
-    const uploadDir = path.isAbsolute(env.UPLOAD_DIR)
-        ? env.UPLOAD_DIR
-        : path.join(__dirname, '..', env.UPLOAD_DIR);
+    const uploadDir = path.isAbsolute(process.env.UPLOAD_DIR || '')
+                        ? (process.env.UPLOAD_DIR)
+                        : path.join(__dirname, '..', process.env.UPLOAD_DIR || 'public/images');
 
-    app.use('/images', express.static(uploadDir));
+    // Sirve todo lo que esté dentro de UPLOAD_DIR en /images (o lo que definas en MOUNT_PATH)
+    app.use(MOUNT_PATH, express.static(uploadDir));
 
     // Prefijo API
     app.use('/api', api);

@@ -11,7 +11,7 @@ router.get('/',        requireAuth, requireRole('CLIENTE','ADMIN'), CartControll
 router.post('/items',  requireAuth, requireRole('CLIENTE','ADMIN'), CartController.addItem);
 router.put('/items/:itemId', requireAuth, requireRole('CLIENTE','ADMIN'), CartController.updateItem);
 router.delete('/items/:itemId', requireAuth, requireRole('CLIENTE','ADMIN'), CartController.removeItem);
-router.post('/clear',  requireAuth, requireRole('CLIENTE','ADMIN'), CartController.clear);
+router.delete('/clear',  requireAuth, requireRole('CLIENTE','ADMIN'), CartController.clear);
 router.post('/checkout', requireAuth, requireRole('CLIENTE','ADMIN'), CartController.checkout);
 
 export default router;

@@ -34,10 +34,10 @@ export async function setupAdmin(req, res) {
         );
 
         res.status(201).json({
-        message: 'Usuario ADMIN creado correctamente',
-        correo,
-        contrasena,
-        nota: 'Por seguridad, cambia la contraseña después del primer inicio de sesión.'
+            message: 'Usuario ADMIN creado correctamente',
+            correo,
+            contrasena,
+            nota: 'Por seguridad, cambia la contraseña después del primer inicio de sesión.'
         });
     } catch (e) {
         console.error('Error creando admin:', e);

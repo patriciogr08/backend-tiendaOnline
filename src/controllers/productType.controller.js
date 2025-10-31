@@ -12,7 +12,7 @@ export const ProductTypeController = {
         res.json(rows);
         } catch (e) {
         console.error('ProductType.list', e);
-        res.status(500).json({ message: 'Failed to list product types' });
+        res.status(500).json({ message: 'Error al obtener el listado de tipos de productos' });
         }
     }
 };

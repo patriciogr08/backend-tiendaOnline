@@ -15,7 +15,7 @@ export function ensureAuth(req, res, next) {
     try {
         const payload = jwt.verify(token, process.env.JWT_SECRET);
         req.user = {
-            id: payload.id,     // mapea sub -> id
+            id: payload.id,
             correo: payload.correo,
             rol: payload.rol,
             nombre_completo: payload.nombre_completo

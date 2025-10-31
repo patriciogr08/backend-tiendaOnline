@@ -39,11 +39,18 @@ export const CartController = {
             [cart.id]
         );
 
+        const base = (process.env.PUBLIC_URL || '').replace(/\/+$/,''); 
+        const data = items.map(r => {
+            let url = r.foto_url;
+            if (url) url = `${base}${url}`;
+            return { ...r, foto_url: url };
+        });
+
         const total = items.reduce((acc, x) => acc + Number(x.total || 0), 0);
-        res.json({ cart, items, total });
+        res.json({ cart, items : data, total });
         } catch (e) {
         console.error('Cart.getOrCreate', e);
-        res.status(500).json({ message: 'Failed to get cart' });
+        res.status(500).json({ message: 'Error al obtener el carrito' });
         }
     },
 
@@ -53,7 +60,7 @@ export const CartController = {
         const userId = req.user.id;
         const { producto_id, cantidad = 1 } = req.body || {};
         if (!producto_id || Number(cantidad) <= 0) {
-            return res.status(400).json({ message: 'producto_id and cantidad > 0 are required' });
+            return res.status(400).json({ message: 'El producto seleccionado debe ser mayor a 0' });
         }
 
         // 1) cart
@@ -77,7 +84,7 @@ export const CartController = {
             FROM producto WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
             [producto_id]
         );
-        if (!prodRows.length) return res.status(404).json({ message: 'Product not found' });
+        if (!prodRows.length) return res.status(404).json({ message: 'Producto no encontrado' });
 
         const p = prodRows[0];
         const finalUnit = calcFinalPrice(p);
@@ -109,7 +116,7 @@ export const CartController = {
         return CartController.getOrCreate(req, res);
         } catch (e) {
         console.error('Cart.addItem', e);
-        res.status(500).json({ message: 'Failed to add item' });
+        res.status(500).json({ message: 'Error al agregar un item al carrito' });
         }
     },
 
@@ -120,7 +127,7 @@ export const CartController = {
         const itemId = Number(req.params.itemId);
         const { cantidad } = req.body || {};
         if (!itemId || Number(cantidad) <= 0) {
-            return res.status(400).json({ message: 'cantidad > 0 is required' });
+            return res.status(400).json({ message: 'La cantidad tiene que ser mayor a 0' });
         }
 
         // verifica pertenencia del item al cart del usuario
@@ -147,7 +154,7 @@ export const CartController = {
         return CartController.getOrCreate(req, res);
         } catch (e) {
         console.error('Cart.updateItem', e);
-        res.status(500).json({ message: 'Failed to update item' });
+        res.status(500).json({ message: 'Error al actualizar el item del carrito' });
         }
     },
 
@@ -163,12 +170,12 @@ export const CartController = {
             WHERE ci.id = ? AND c.usuario_id = ? AND c.estado = 'ABIERTO'`,
             [itemId, userId]
         );
-        if (del.affectedRows === 0) return res.status(404).json({ message: 'Item not found' });
+        if (del.affectedRows === 0) return res.status(404).json({ message: 'Item no encontrado' });
 
         return CartController.getOrCreate(req, res);
         } catch (e) {
         console.error('Cart.removeItem', e);
-        res.status(500).json({ message: 'Failed to remove item' });
+        res.status(500).json({ message: 'Error al eliminar un item' });
         }
     },
 
@@ -187,31 +194,123 @@ export const CartController = {
         return CartController.getOrCreate(req, res);
         } catch (e) {
         console.error('Cart.clear', e);
-        res.status(500).json({ message: 'Failed to clear cart' });
+        res.status(500).json({ message: 'Error al limpiar el carrito' });
         }
     },
 
     // Checkout simple: marca el carrito y devuelve id (luego lo ligamos a "pedido")
     async checkout(req, res) {
-        try {
         const userId = req.user.id;
-        const [cartRows] = await pool.query(
-            `SELECT id FROM carrito WHERE usuario_id = ? AND estado = 'ABIERTO' LIMIT 1`,
-            [userId]
-        );
-        if (!cartRows.length) return res.status(400).json({ message: 'No open cart' });
 
-        const cartId = cartRows[0].id;
+        const cx = await pool.getConnection();
+        try {
+            // 1) Carrito abierto
+            const [cartRows] = await cx.query(
+                `SELECT id FROM carrito WHERE usuario_id = ? AND estado = 'ABIERTO' LIMIT 1`,
+                [userId]
+            );
+            if (!cartRows.length) {
+                return res.status(400).json({ message: 'No tiene carrito abierto' });
+            }
+            const cartId = cartRows[0].id;
 
-        // valida que tenga items
-        const [cnt] = await pool.query(`SELECT COUNT(*) as n FROM item_carrito WHERE carrito_id = ?`, [cartId]);
-        if (!cnt[0].n) return res.status(400).json({ message: 'Cart is empty' });
+            // 2) Items
+            const [items] = await cx.query(
+                `SELECT ic.producto_id, ic.cantidad, ic.precio_unitario, ic.descuento, ic.total,
+                        p.nombre AS producto_nombre, p.foto_url AS producto_foto
+                FROM item_carrito ic
+                JOIN producto p ON p.id = ic.producto_id
+                WHERE ic.carrito_id = ?`,
+                [cartId]
+            );
+            if (!items.length) {
+                return res.status(400).json({ message: 'El carrito está vacío' });
+            }
 
-        await pool.query(`UPDATE carrito SET estado = 'PEDIDO' WHERE id = ?`, [cartId]);
-        res.json({ ok: true, cart_id: cartId });
+            // 3) Totales
+            const subtotal  = items.reduce((a, r) => a + (Number(r.precio_unitario) * Number(r.cantidad)), 0);
+            const descuento = items.reduce((a, r) => a + Number(r.descuento || 0), 0);
+            const impuesto  = items.reduce((a, r) => a + Number(r.impuesto || 0), 0);
+            const envio     = 0; // si luego tienes tabla de tarifas, cámbialo aquí
+            const total     = items.reduce((a, r) => a + Number(r.total), 0) || (subtotal - descuento + impuesto + envio);
+            
+            await cx.beginTransaction();
+            // 4) Direcciones por defecto (si existen)
+            const [[ship]] = await cx.query(
+                `SELECT id FROM direccion WHERE usuario_id=? AND tipo='SHIPPING' AND es_predeterminada=1 LIMIT 1`,
+                [userId]
+            );
+            const [[bill]] = await cx.query(
+                `SELECT id FROM direccion WHERE usuario_id=? AND tipo='BILLING' AND es_predeterminada=1 LIMIT 1`,
+                [userId]
+            );
+            const dirEnvioId = ship?.id ?? null;
+            const dirFactId  = bill?.id ?? null;
+
+            // 5) Crear Pedido (estado PENDIENTE)
+            const moneda = 'USD';
+            const [insPedido] = await cx.query(
+                `INSERT INTO pedido
+                (usuario_id, direccion_facturacion_id, direccion_envio_id, estado, moneda,
+                subtotal, descuento, envio, impuesto, total)
+                VALUES (?, ?, ?, 'PENDIENTE', ?, ?, ?, ?, ?, ?)`,
+                [userId, dirFactId, dirEnvioId, moneda, subtotal, descuento, envio, impuesto, total]
+            );
+            const pedidoId = insPedido.insertId;
+
+            // número legible: PED-000001
+            await cx.query(
+                `UPDATE pedido SET numero = CONCAT('PED-', LPAD(?, 6, '0')) WHERE id = ?`,
+                [pedidoId, pedidoId]
+            );
+
+            // 6) Detalles del pedido con snapshot
+            const detalleValues = items.map(r => ([
+                pedidoId,
+                r.producto_id,
+                r.cantidad,
+                r.precio_unitario,
+                r.descuento || 0,
+                r.impuesto || 0,
+                r.total,
+                r.producto_nombre,
+                r.producto_foto
+            ]));
+
+            await cx.query(
+                `INSERT INTO detalle_pedido
+                (pedido_id, producto_id, cantidad, precio_unitario, descuento, impuesto, total,
+                producto_nombre_snapshot, producto_foto_snapshot)
+                VALUES ?`,
+                [detalleValues]
+            );
+
+            // 7) Crear pago PENDIENTE (por defecto EFECTIVO; ajusta si manejas otro flujo)
+            await cx.query(
+                `INSERT INTO pago (pedido_id, metodo, estado, monto)
+                VALUES (?, 'EFECTIVO', 'PENDIENTE', ?)`,
+                [pedidoId, total]
+            );
+
+            // 8) Cerrar carrito
+            await cx.query(`UPDATE carrito SET estado = 'PEDIDO' WHERE id = ?`, [cartId]);
+
+            await cx.commit(); cx.release();
+
+            // Respuesta (mantengo cart_id para no romper tu front; agrego pedido info)
+            return res.json({
+                ok: true,
+                cart_id: cartId,
+                pedido_id: pedidoId,
+                numero: `PED-${String(pedidoId).padStart(6, '0')}`,
+                total
+            });
         } catch (e) {
-        console.error('Cart.checkout', e);
-        res.status(500).json({ message: 'Failed to checkout' });
+            await cx.rollback(); 
+            console.error('Cart.checkout', e);
+            return res.status(500).json({ message: 'No se pudo procesar el checkout' });
+        }finally{
+            cx.release();
         }
     }
 };
