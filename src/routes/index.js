@@ -9,6 +9,7 @@ import profileRoutes from './profile.routes.js';
 import addressesRoutes from './addresses.routes.js';
 import usersRoutes from './users.routes.js';
 import ordersRoutes from './orders.routes.js';
+import courierRoutes from './courier.routes.js';
 
 const api = Router();
 
@@ -22,6 +23,7 @@ api.use('/me', profileRoutes);
 api.use('/me', addressesRoutes);
 api.use('/admin',usersRoutes)
 api.use('/orders',ordersRoutes)
+api.use('/courier',courierRoutes)
 api.use('/health', healthRoutes);
 
 export default api;

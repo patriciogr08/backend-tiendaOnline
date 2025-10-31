@@ -94,8 +94,14 @@ export const OrdersController = {
             ORDER BY id DESC`,
             [id]
         );
+        const base = (process.env.PUBLIC_URL || '').replace(/\/+$/,''); 
+        const data = pagos.map(r => {
+            let url = r.comprobante_transferencia_url;
+            if (url) url = `${base}${url}`;
+            return { ...r, comprobante_transferencia_url: url };
+        });
 
-        res.json({ ...hdr[0], items, pagos });
+        res.json({ ...hdr[0], items, pagos:data });
         } catch (e) {
         console.error('OrdersController.adminGetById', e);
         res.status(500).json({ message: 'Error al obtener el pedido' });
